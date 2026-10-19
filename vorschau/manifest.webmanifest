@@ -1,0 +1,17 @@
+{
+  "name": "Dashboard Vorschau",
+  "short_name": "Vorschau",
+  "description": "Deine selbstgebauten Web-Apps als Live-Vorschau, ein Tipp macht sie groß",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1B1B1B",
+  "theme_color": "#0b0e14",
+  "lang": "de",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

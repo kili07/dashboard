@@ -3,11 +3,16 @@
 /* ═══════════════════════════════════════════════════════════════
    Dashboard — Startseite für selbstgebaute Web-Apps
 
+   Zwei Ansichten, oben umschaltbar: „Symbole“ (jede Kachel ist ein Link,
+   der die installierte App startet) und „Vorschau“ (jede Kachel zeigt die
+   App selbst, ein Tipp zieht sie groß). Die Vorschau steht im gleichnamigen
+   Abschnitt und in DECISIONS.md, Abschnitt 4.
+
    Abschnitte (in dieser Reihenfolge):
    Konstanten · Datenmodell · Persistenz · Aussehen · Helfer · Öffnen ·
-   Kacheln · Sortieren · Hinweise · Formular · Testmodus · Einstellungen ·
-   Backup · Updates · Installieren · Sheet · Dialoge · Zurück-Taste ·
-   Verdrahtung · Start
+   Kacheln · Vorschau · Sortieren · Hinweise · Formular · Testmodus ·
+   Einstellungen · Backup · Updates · Installieren · Sheet · Dialoge ·
+   Zurück-Taste · Verdrahtung · Start
    ═══════════════════════════════════════════════════════════════ */
 
 const KEY = 'dashboard.v1';
@@ -16,7 +21,7 @@ const KEY = 'dashboard.v1';
 const SCHEMA = 1;
 /* Bei jeder Änderung hochzählen — wird in den Einstellungen angezeigt, damit
    sich auf dem Handy prüfen lässt, welche Fassung wirklich läuft. */
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 /* Spiegel für das Startskript in index.html: ohne sie flackert beim Start das
    Theme und die Kacheln springen in ihre Größe. */
@@ -60,6 +65,7 @@ const blank = () => ({
   title: 'Meine Apps',   // Überschrift oben
   theme: 'auto',         // 'auto' | 'light' | 'dark'
   accent: '#4f5bd5',     // Akzentfarbe (Hex)
+  view: 'icons',         // Ansicht 'icons' (Symbole, Tipp startet die App) | 'preview' (Live-Vorschau)
   layout: 'grid',        // 'grid' | 'list'
   size: 'm',             // Kachelgröße 's' | 'm' | 'l'
   shape: 'rounded',      // Kachelform 'square' | 'rounded' | 'round'
@@ -117,6 +123,7 @@ function normalize(src) {
   d.title = str(d.title, NAME_MAX) || base.title;
   d.theme = pick(d.theme, ['auto', 'light', 'dark'], base.theme);
   d.accent = HEX_RE.test(d.accent) ? d.accent.toLowerCase() : base.accent;
+  d.view = pick(d.view, ['icons', 'preview'], base.view);
   d.layout = pick(d.layout, ['grid', 'list'], base.layout);
   d.size = pick(d.size, ['s', 'm', 'l'], base.size);
   d.shape = pick(d.shape, ['square', 'rounded', 'round'], base.shape);
@@ -201,6 +208,7 @@ function applyLook() {
   const root = document.documentElement;
   const t = effectiveTheme();
   root.dataset.theme = t;
+  root.dataset.view = previewMode() ? 'preview' : 'icons';
   root.dataset.layout = db.layout;
   root.dataset.size = db.size;
   root.dataset.shape = db.shape;
@@ -210,11 +218,13 @@ function applyLook() {
   root.style.setProperty('--accent', db.accent);
   root.style.setProperty('--on-accent', onAccent);
   const meta = $('meta[name="theme-color"]');
-  if (meta) meta.content = THEMES[t].bar;
+  // Ist eine App groß, färbt sie die Systemleiste; die Farbe des Dashboards kommt beim Schließen zurück
+  if (opened) barBefore = THEMES[t].bar;
+  else if (meta) meta.content = THEMES[t].bar;
   try {
     localStorage.setItem(THEME_KEY, db.theme);
     localStorage.setItem(LOOK_KEY, JSON.stringify({
-      layout: db.layout, size: db.size, shape: db.shape, labels: db.labels, font: db.font,
+      view: db.view, layout: db.layout, size: db.size, shape: db.shape, labels: db.labels, font: db.font,
       accent: db.accent, onAccent,
     }));
   } catch (e) { /* nicht schlimm: dann flackert nur der nächste Start */ }
@@ -406,6 +416,9 @@ function launchTarget(url, method, pkg, android) {
 let editing = false;         // Bearbeitungsmodus: Kacheln sind Knöpfe, Ziehen sortiert
 let query = '';              // Suchbegriff
 
+const ICON_VIEW_ICONS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.8"/></svg>';
+const ICON_VIEW_PREVIEW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3" width="7.5" height="18" rx="2"/><rect x="13" y="3" width="7.5" height="18" rx="2"/><path d="M6 7h2.5M15.5 7h2.5"/></svg>';
+
 /** Symbol einer Kachel. Bilder anderer Apps nur im <img>; schlägt das Laden
     fehl, ersetzt onImgError() es durch das Zeichen (data-g) auf der Farbe. */
 function iconHtml(a) {
@@ -419,6 +432,8 @@ function iconHtml(a) {
   return `<span class="tile-ic ${gc}" style="${style}" aria-hidden="true">${esc(g)}</span>`;
 }
 
+/** Kachel der Ansicht „Symbole“: ein echter Link, damit der Tipp als
+    Benutzergeste zählt (DECISIONS.md 2, B7). */
 function tileHtml(a) {
   const text = `<span class="tile-text"><span class="tile-name">${esc(a.name)}</span>`
     + `<span class="tile-sub">${esc(shortUrl(a.url))}</span></span>`;
@@ -436,9 +451,11 @@ function tileHtml(a) {
 const fold = (s) => s.toLocaleLowerCase('de-DE').normalize('NFD').replace(/\p{M}/gu, '');
 const matches = (a, q) => fold(a.name + ' ' + shortUrl(a.url)).includes(q);
 
-/** Alles neu zeichnen. Bei ein paar Dutzend Kacheln ist gezieltes
-    Aktualisieren unnötige Komplexität — einmal neu rendern ist schnell genug
-    und kann nicht aus dem Tritt geraten. */
+/** Kopf und Kacheln nachziehen. Die beiden Ansichten bauen ihre Kacheln
+    verschieden: „Symbole“ zeichnet alles neu, „Vorschau“ verwendet sie
+    wieder (siehe newTile). Beim Wechsel der Ansicht wird das Raster deshalb
+    einmal geleert — das wirft auch alle Vorschauen weg und gibt ihren
+    Speicher frei. */
 function render() {
   $('#title').textContent = db.title;
   document.title = db.title;
@@ -449,25 +466,132 @@ function render() {
   $('#editHelp').classList.toggle('hidden', !editing || !db.apps.length);
   $('#btnEdit').classList.toggle('hidden', editing || !db.apps.length);
   $('#btnDone').classList.toggle('hidden', !editing);
+  // Ansicht umschalten: der Knopf zeigt, wohin es geht. Beim Bearbeiten weg, sonst wird der Titel zu knapp
+  const bv = $('#btnView');
+  bv.classList.toggle('hidden', editing || !db.apps.length || IN_FRAME);
+  if (bv.dataset.view !== db.view) {
+    bv.dataset.view = db.view;
+    bv.innerHTML = db.view === 'preview' ? ICON_VIEW_ICONS : ICON_VIEW_PREVIEW;
+    bv.setAttribute('aria-label', db.view === 'preview' ? 'Symbole zeigen' : 'Live-Vorschau zeigen');
+    bv.title = bv.getAttribute('aria-label');
+  }
   // Backup fällig: ein Punkt am Zahnrad, mehr Aufdringlichkeit braucht es nicht
   $('#btnSettings').classList.toggle('badge', backupDue());
   $('#btnSettings').setAttribute('aria-label', backupDue() ? 'Einstellungen, Backup empfohlen' : 'Einstellungen');
 
   const grid = $('#grid');
-  if (!db.apps.length) {
-    grid.innerHTML = `<div class="empty">
-      <p>Noch keine Apps. Füge Deine erste selbstgebaute App hinzu, sie erscheint dann hier als Kachel.</p>
-      <button type="button" class="btn btn-primary" data-act="add">${ICON_PLUS} App hinzufügen</button>
-    </div>`;
-    return;
+  const view = previewMode() ? 'preview' : 'icons';
+  if (grid.dataset.view !== view) {
+    if (boxRO) boxRO.disconnect();
+    grid.innerHTML = '';
+    grid.dataset.view = view;
   }
+  if (view === 'preview') renderPreviews(grid); else renderIcons(grid);
+}
+
+const EMPTY_HTML = `<div class="empty">
+  <p>Noch keine Apps. Füge Deine erste selbstgebaute App hinzu, sie erscheint dann hier als Kachel.</p>
+  <button type="button" class="btn btn-primary" data-act="add">${ICON_PLUS} App hinzufügen</button>
+</div>`;
+
+const ADD_TILE_HTML = '<button type="button" class="tile tile-add" data-act="add">'
+  + `<span class="tile-box"><span class="tile-ic" aria-hidden="true">${ICON_PLUS}</span></span>`
+  + '<span class="tile-text"><span class="tile-name">Hinzufügen</span></span></button>';
+
+/** Ansicht „Symbole“: alles neu zeichnen. Bei ein paar Dutzend Kacheln ist
+    gezieltes Aktualisieren unnötige Komplexität — einmal neu rendern ist
+    schnell genug und kann nicht aus dem Tritt geraten. */
+function renderIcons(grid) {
+  if (!db.apps.length) { grid.innerHTML = EMPTY_HTML; return; }
   const q = fold(query.trim());
   const list = q ? db.apps.filter((a) => matches(a, q)) : db.apps;
   grid.innerHTML = list.map(tileHtml).join('')
-    + (editing ? `<button type="button" class="tile tile-add" data-act="add">`
-      + `<span class="tile-box"><span class="tile-ic" aria-hidden="true">${ICON_PLUS}</span></span>`
-      + `<span class="tile-text"><span class="tile-name">Hinzufügen</span></span></button>` : '')
+    + (editing ? ADD_TILE_HTML : '')
     + (q && !list.length ? `<p class="nothing">Nichts gefunden.</p>` : '');
+}
+
+/** Ansicht „Vorschau“: Kacheln wiederverwenden statt neu bauen — nur so
+    bleiben die Vorschauen beim Sortieren, Suchen und Umstellen am Leben. */
+function renderPreviews(grid) {
+  // Leerzustand, „Hinzufügen“ und „Nichts gefunden“ sind keine Kacheln: die entstehen jedes Mal neu
+  $$('#grid > :not(.tile[data-id])').forEach((n) => n.remove());
+  const q = fold(query.trim());
+  const have = new Map($$('#grid > .tile[data-id]').map((t) => [t.dataset.id, t]));
+  let prev = null, shown = 0;
+  for (const a of db.apps) {
+    let t = have.get(a.id);
+    if (t) have.delete(a.id); else t = newTile(a);
+    updateTile(t, a);
+    // Ausgefilterte Kacheln nur verstecken, damit ihre Vorschau weiterläuft
+    const hit = !q || matches(a, q);
+    t.classList.toggle('hidden', !hit);
+    if (hit) shown++;
+    const want = prev ? prev.nextSibling : grid.firstChild;
+    if (t !== want) moveEl(grid, t, want);
+    syncFrame(t, a);           // erst eingehängt: vorher hat ein iframe kein Window für den Eingriff
+    prev = t;
+  }
+  have.forEach(dropTile);
+
+  if (!db.apps.length) { grid.insertAdjacentHTML('beforeend', EMPTY_HTML); return; }
+  grid.insertAdjacentHTML('beforeend', (editing ? ADD_TILE_HTML : '')
+    + (q && !shown ? '<p class="nothing">Nichts gefunden.</p>' : ''));
+  scaleTiles();
+}
+
+/** Kachel der Vorschau anlegen. Sie bleibt danach bestehen, solange es die
+    App gibt: renderPreviews() zieht nur Text und Symbol nach und schiebt sie
+    an ihren Platz. Neu zeichnen per innerHTML wie bei den Symbolen geht hier
+    nicht — dabei flöge jedes iframe raus, und alle Apps würden neu geladen.
+    Aufbau: tile-box trägt Symbol (Platzhalter, solange die App lädt) und
+    iframe; tile-hit liegt als Knopf über allem und nimmt Tipps an — das
+    iframe selbst ist in der Kachel unbedienbar (pointer-events:none). */
+function newTile(a) {
+  const t = document.createElement('div');
+  t.className = 'tile';
+  t.dataset.id = a.id;
+  t.innerHTML = '<span class="tile-box"><span class="tile-ic"></span></span>'
+    + '<span class="tile-text"><span class="tile-name"></span><span class="tile-sub"></span></span>'
+    + '<button type="button" class="tile-hit"></button>';
+  if (boxRO) boxRO.observe($('.tile-box', t));
+  return t;
+}
+
+/** Text, Symbol und Bearbeiten-Zustand einer bestehenden Kachel nachziehen. */
+function updateTile(t, a) {
+  const ic = iconHtml(a);
+  // outerHTML ersetzt nur das Symbol, das iframe daneben bleibt unberührt
+  if (t.dataset.ic !== ic) { $('.tile-ic', t).outerHTML = ic; t.dataset.ic = ic; }
+  $('.tile-name', t).textContent = a.name;
+  $('.tile-sub', t).textContent = shortUrl(a.url);
+  const hit = $('.tile-hit', t);
+  hit.setAttribute('aria-label', editing ? `${a.name} bearbeiten` : `${a.name} groß öffnen`);
+  if (editing) hit.setAttribute('aria-describedby', 'editHelp'); else hit.removeAttribute('aria-describedby');
+  const badge = $('.tile-badge', t);
+  if (editing && !badge) $('.tile-box', t).insertAdjacentHTML('beforeend', `<span class="tile-badge" aria-hidden="true">${ICON_PEN}</span>`);
+  else if (!editing && badge) badge.remove();
+}
+
+function dropTile(t) {
+  if (boxRO) boxRO.unobserve($('.tile-box', t));
+  t.remove();
+}
+
+/** Element an seinen Platz schieben. moveBefore (Chrome 133+) verschiebt,
+    ohne das iframe darin neu zu laden. insertBefore lädt es neu und bleibt
+    nur der Ersatz für ältere Browser und für frisch angelegte Kacheln. */
+function moveEl(parent, el, ref) {
+  if (parent.moveBefore && el.isConnected) {
+    try { parent.moveBefore(el, ref); return; } catch (e) { /* unten */ }
+  }
+  parent.insertBefore(el, ref);
+}
+
+/** Ansicht wechseln (Knopf oben, Einstellungen). */
+function setView(v) {
+  if (db.view === v) return;
+  setLook('view', v);
+  toast(v === 'preview' ? 'Live-Vorschau' : 'Symbole', 1400);
 }
 
 /** Ein Icon-Bild lädt nicht (offline, Adresse falsch): Zeichen auf Farbe. */
@@ -497,7 +621,521 @@ function moveApp(id, dir) {
   save();
   render();
   const el = $(`#grid .tile[data-id="${CSS.escape(id)}"]`);
-  if (el) el.focus();
+  // In der Vorschau trägt der Knopf über der Kachel den Fokus, bei den Symbolen die Kachel selbst
+  if (el) ($('.tile-hit', el) || el).focus();
+}
+
+/* ── Vorschau ───────────────────────────────────────────────────
+   Nur in der Ansicht „Vorschau“. Jede Kachel enthält die App selbst: ein
+   iframe in voller Handygröße, per transform auf Kachelgröße verkleinert. Ein Tipp zieht genau dieses iframe
+   auf die volle Fläche. Es wird dabei nicht neu geladen, die App steht also
+   sofort da, mit ihrem Zustand.
+
+   Heikel wird das, weil Deine Apps auf derselben Adresse liegen wie das
+   Dashboard (gleicher Origin). Daraus folgen drei Dinge, ausprobiert in
+   Chromium 152, Details in DECISIONS.md 4.2:
+
+   1. Verlauf. Jede App legt beim Start einen Zurück-Wächter an
+      (history.pushState). Aus einem iframe landet er im gemeinsamen Verlauf
+      des Fensters, und Zurück ginge an eine unsichtbare App statt ans
+      Dashboard. Deshalb wird pushState im iframe zu replaceState, noch bevor
+      die App startet (patchFrame). Für die große App reicht das Dashboard
+      Zurück an die App weiter (backInApp), damit sie wie gewohnt reagiert.
+   2. Neu laden verliert den Eingriff. Lädt sich eine App selbst neu, etwa
+      nach einem Update, läuft sie ohne ihn. onFrameLoad bemerkt das und
+      ersetzt die Vorschau durch eine frische.
+   3. Gemeinsamer Speicher. Die Vorschau liest dieselben Daten wie die
+      installierte App. Ändert die installierte App etwas, ist die Vorschau
+      veraltet — und würde beim Weiterbenutzen die Änderung überschreiben.
+      Deshalb lädt die Vorschau betroffene Kacheln neu (storage-Ereignis,
+      Rückkehr ins Fenster) und warnt in der großen App. */
+
+const OPEN_MS = 280;         // Dauer des Aufziehens, wie --open-ms in style.css
+const OWN_WRITE_MS = 2000;   // so lange gilt eine Speicheränderung als „von einer Vorschau hier“
+
+/* Läuft das Dashboard selbst in einer Vorschau (als Kachel in sich selbst),
+   zeigt es nur Symbole. Sonst lüde es sich endlos ineinander. */
+const IN_FRAME = (() => { try { return window.top !== window.self; } catch (e) { return true; } })();
+const previewMode = () => db.view === 'preview' && !IN_FRAME;
+
+let frameW = 390, frameH = 760;   // so groß rendert jede App: genau die Größe, die sie geöffnet hat
+let opened = null;                // { id, tile, frame } der gerade großen App
+let patchWorks = false;           // hat der Eingriff vor dem Start schon einmal gegriffen? (siehe settleTile)
+
+const sameOrigin = (href) => { try { return new URL(href).origin === location.origin; } catch (e) { return false; } };
+const appById = (id) => db.apps.find((a) => a.id === id);
+const tileById = (id) => $(`#grid .tile[data-id="${CSS.escape(id)}"]`);
+
+/** Vor dem Start der App eingreifen. Ein iframe hat zuerst ein leeres
+    about:blank-Dokument. Navigiert es von dort zu einer Seite desselben
+    Origins, behält der Browser das Window-Objekt (HTML-Standard: „initial
+    about:blank“ wird wiederverwendet) — was hier am Window geändert wird,
+    gilt also auch für die App. Dafür muss src VOR dem Einhängen gesetzt sein
+    (makeFrame). Bei fremdem Origin geht der Eingriff ohne Schaden ins Leere. */
+function patchFrame(f) {
+  let w;
+  try { w = f.contentWindow; if (!w) return; w.__dashboard = true; } catch (e) { return; }
+  try {
+    const H = w.History.prototype;
+    const replace = H.replaceState;
+    // Gleiche Wirkung auf URL und state, nur ohne neuen Schritt im Verlauf
+    H.pushState = function (state, title, url) { return replace.call(this, state, title, url); };
+    // Merken, wann diese Vorschau selbst gespeichert hat (siehe fromOwnFrame und ownWrite)
+    const S = w.Storage.prototype;
+    ['setItem', 'removeItem', 'clear'].forEach((k) => {
+      const orig = S[k];
+      S[k] = function () {
+        w.__wrote = Date.now();
+        const r = orig.apply(this, arguments);
+        ownWrite();
+        return r;
+      };
+    });
+  } catch (e) { /* dann eben ohne — onFrameLoad fängt den Rest */ }
+}
+
+function makeFrame(a) {
+  const f = document.createElement('iframe');
+  f.className = 'tile-frame';
+  f.title = a.name;
+  f.tabIndex = -1;
+  f.inert = true;                      // in der Kachel weder Fokus noch Tipps
+  f.setAttribute('aria-hidden', 'true');
+  f.loading = 'lazy';                  // Kacheln weit unten laden erst beim Hinscrollen
+  f.dataset.src = a.url;
+  f.src = a.url;                       // vor dem Einhängen, sonst greift patchFrame nicht
+  f.addEventListener('load', () => onFrameLoad(f));
+  return f;
+}
+
+function addFrame(box, a, next) {
+  const f = makeFrame(a);
+  if (next) f.classList.add('next');   // Ersatz, der unsichtbar lädt und dann die alte ablöst
+  box.insertBefore(f, $('.tile-badge', box));
+  patchFrame(f);
+  return f;
+}
+
+/** Hat die Kachel das richtige iframe? Neue Adresse: neues iframe. */
+function syncFrame(tile, a) {
+  const box = $('.tile-box', tile);
+  const f = $('.tile-frame:not(.next)', box);
+  if (f && f.dataset.src === a.url) { f.title = a.name; return; }
+  if (f && opened && opened.frame === f) return;      // die große App nicht unter den Fingern austauschen
+  $$('.tile-frame', box).forEach((x) => x.remove());
+  tile.classList.remove('live', 'failed');
+  addFrame(box, a, false);
+}
+
+/** Wie ist das iframe geladen? live = App läuft mit Eingriff, raw = ohne
+    (hat sich selbst neu geladen), failed = Fehlerseite (offline, Server weg),
+    blank = noch das leere Anfangsdokument. */
+function frameState(f) {
+  if (!sameOrigin(f.dataset.src)) return 'live';       // fremde Seite: nicht einsehbar, so nehmen wie sie ist
+  let d = null;
+  try { d = f.contentDocument; } catch (e) { /* null */ }
+  if (!d) return 'failed';                             // Chromes Fehlerseiten haben einen fremden Origin
+  if (d.URL === 'about:blank') return 'blank';
+  try { if (f.contentWindow.__dashboard) { patchWorks = true; return 'live'; } } catch (e) { return 'failed'; }
+  return 'raw';
+}
+
+function onFrameLoad(f) {
+  const tile = f.closest('.tile');
+  if (!tile) return;
+  const st = frameState(f);
+  if (st === 'blank') return;
+  f.dataset.state = st;
+  if (f.classList.contains('next')) return;            // der Ersatz meldet sich in refreshTile
+  settleTile(tile, f, st);
+}
+
+function settleTile(tile, f, st) {
+  tile.classList.toggle('failed', st === 'failed');
+  tile.classList.toggle('live', st !== 'failed');
+  if (st === 'raw') {
+    /* Ohne Eingriff hat die App einen Eintrag im Verlauf hinterlassen und hört
+       selbst auf Zurück. Eine frische Vorschau ist wieder gezähmt. Nur wenn der
+       Eingriff in diesem Browser überhaupt greift (patchWorks) — sonst würde
+       endlos neu geladen — und nicht bei der großen App, die gerade benutzt wird. */
+    if (patchWorks && !(opened && opened.frame === f) && !f.dataset.retried) refreshTile(tile, true);
+    else patchLate(f);
+    return;
+  }
+  if (st === 'live') hookFrame(f);
+  if (opened && opened.frame === f) paintStage(f);
+}
+
+/** Eingriff nachholen, nachdem die App schon läuft: verhindert weitere
+    Verlaufseinträge, den ersten vom Start nicht mehr. */
+function patchLate(f) {
+  try {
+    const H = f.contentWindow.History.prototype;
+    const replace = H.replaceState;
+    H.pushState = function (s, t, u) { return replace.call(this, s, t, u); };
+  } catch (e) { /* fremder Origin */ }
+  hookFrame(f);
+}
+
+/** Escape in der großen App verkleinert sie — außer die App hat gerade ein
+    eigenes Sheet offen, das gehört dann ihr. Capture am window läuft vor den
+    Tasten-Handlern der App. Dazu: wechselt die App ihr Theme, zieht die
+    Leiste der Bühne mit. */
+function hookFrame(f) {
+  try {
+    const w = f.contentWindow;
+    w.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !opened || opened.frame !== f || appSheetOpen(f)) return;
+      e.preventDefault();
+      closeApp();
+    }, true);
+    new w.MutationObserver(() => { if (opened && opened.frame === f) paintStage(f); })
+      .observe(f.contentDocument.documentElement, { attributes: true, subtree: true, attributeFilter: ['data-theme', 'content'] });
+  } catch (e) { /* fremder Origin */ }
+}
+
+/** Sheet der App offen? Alle Deine Apps folgen der Bauanleitung: #sheet ohne .hidden. */
+function appSheetOpen(f) {
+  try {
+    const s = f.contentDocument.getElementById('sheet');
+    return !!s && !s.classList.contains('hidden');
+  } catch (e) { return false; }
+}
+
+/** Vorschau einer Kachel frisch laden. Der Ersatz lädt unsichtbar hinter der
+    alten und löst sie erst ab, wenn er steht — so blinkt nichts. */
+function refreshTile(tile, retried) {
+  const box = $('.tile-box', tile);
+  const a = appById(tile.dataset.id);
+  if (!box || !a || !previewMode() || $('.tile-frame.next', box)) return;
+  const old = $('.tile-frame:not(.next)', box);
+  const f = addFrame(box, a, true);
+  if (retried) f.dataset.retried = '1';
+  const giveUp = setTimeout(() => f.remove(), 20000);  // lädt nicht (offline): alte Vorschau behalten
+  f.addEventListener('load', () => {
+    const st = f.dataset.state;
+    if (!st) return;                                   // erst das leere Anfangsdokument
+    clearTimeout(giveUp);
+    if (st === 'failed' && old && !tile.classList.contains('failed')) { f.remove(); return; }
+    if (old && opened && opened.frame === old) { f.remove(); showStale(true); return; }
+    if (old) old.remove();
+    f.classList.remove('next');
+    settleTile(tile, f, st);
+  });
+}
+
+/** Alle Vorschauen frisch laden (Einstellungen). */
+function refreshAll() {
+  $$('#grid .tile[data-id]').forEach((t) => { if (!opened || opened.tile !== t) refreshTile(t); });
+}
+
+/** Wo die große App sitzt: der Platzhalter in der Bühne. */
+function stageRect() {
+  const r = $('#stageSlot').getBoundingClientRect();
+  return { left: r.left, top: r.top, width: Math.round(r.width), height: Math.round(r.height) };
+}
+
+/* Maßstab je Kachel: Kachelbreite geteilt durch Renderbreite. Der Observer
+   hält ihn aktuell, wenn Raster, Größe oder Fenster sich ändern. */
+const boxRO = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
+  for (const en of entries) if (en.contentRect.width) en.target.style.setProperty('--s', (en.contentRect.width / frameW).toFixed(4));
+}) : null;
+
+/** Dasselbe von Hand, gleich nach dem Rendern — der Observer meldet sich
+    erst beim nächsten Bild, bis dahin stünden neue Kacheln falsch. */
+function scaleTiles() {
+  $$('#grid .tile-box').forEach((b) => { if (b.clientWidth) b.style.setProperty('--s', (b.clientWidth / frameW).toFixed(4)); });
+}
+
+/** Renderformat aus der Bühne übernehmen. Nicht, solange eine App groß ist:
+    öffnet dort die Tastatur, schrumpft das Fenster, und alle Kacheln würden
+    umgebaut. */
+function measureFrames() {
+  if (opened) return;
+  const r = stageRect();
+  if (r.width < 200 || r.height < 200 || (r.width === frameW && r.height === frameH)) return;
+  frameW = r.width; frameH = r.height;
+  const st = document.documentElement.style;
+  st.setProperty('--fwn', frameW);
+  st.setProperty('--fhn', frameH);
+  scaleTiles();
+}
+
+/** CSS-Farbe → #rrggbb, durchsichtig → null. */
+function rgbToHex(c) {
+  const m = String(c).match(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+%?))?/);
+  if (!m || (m[4] !== undefined && parseFloat(m[4]) === 0)) return null;
+  return '#' + [m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('');
+}
+
+let barBefore = null;        // theme-color des Dashboards, solange eine App sie färbt
+
+/** Bühne in den Farben der App: Leiste wie ihr Hintergrund, Systemleiste wie
+    ihre theme-color. So wirkt die große App wie gestartet, nicht eingebettet. */
+function paintStage(f) {
+  let bg = null, bar = null;
+  try {
+    const d = f.contentDocument;
+    bg = rgbToHex(getComputedStyle(d.body).backgroundColor) || rgbToHex(getComputedStyle(d.documentElement).backgroundColor);
+    const meta = d.querySelector('meta[name="theme-color"]');
+    bar = (meta && HEX_RE.test(meta.content) && meta.content) || bg;
+  } catch (e) { /* fremder Origin: Farben des Dashboards */ }
+  const st = $('#stage').style;
+  if (bg) { st.setProperty('--stage-bg', bg); st.setProperty('--stage-fg', onColor(bg)); }
+  else { st.removeProperty('--stage-bg'); st.removeProperty('--stage-fg'); }
+  const meta = $('meta[name="theme-color"]');
+  if (meta && bar) { if (barBefore === null) barBefore = meta.content; meta.content = bar; }
+}
+
+function fillStage(a, f) {
+  $('#stageName').textContent = a.name;
+  const t = launchTarget(a.url, effectiveMethod(a, db.method), a.pkg, IS_ANDROID);
+  const l = $('#stageLaunch');
+  l.href = t.href;
+  if (t.blank) { l.target = '_blank'; l.rel = 'noopener'; } else { l.removeAttribute('target'); l.removeAttribute('rel'); }
+  l.setAttribute('aria-label', `${a.name} als installierte App öffnen`);
+  showStale(false);
+  paintStage(f);
+}
+
+/** Alles außer der großen App für Tastatur und Screenreader sperren. Nicht
+    #main im Ganzen: das iframe steckt darin, und inert lässt sich von innen
+    nicht aufheben — die App wäre tot. */
+function lockBackground(tile) {
+  const on = !!tile;
+  $('#topbar').inert = on;
+  $$('#main > :not(#grid)').forEach((n) => { n.inert = on; });
+  $$('#grid > *').forEach((n) => { n.inert = on && n !== tile; });
+  if (tile) { $('.tile-hit', tile).inert = on; $('.tile-text', tile).inert = on; }
+  else $$('#grid .tile-hit, #grid .tile-text').forEach((n) => { n.inert = false; });
+}
+
+/** App groß machen. FLIP: das iframe springt ohne Übergang an seine
+    Endposition, bekommt per transform die Lage der Kachel und läuft dann
+    zurück auf transform:none. Es wird nur verschoben und skaliert, nie
+    umgehängt — umhängen würde es neu laden. */
+function openApp(id) {
+  if (opened) return;
+  const a = appById(id);
+  if (!a) return;
+  const tile = tileById(id);
+  const f = tile && $('.tile-frame:not(.next)', tile);
+  if (!f) return;
+  if (tile.classList.contains('failed')) refreshTile(tile);   // offline gewesen? Gleich noch einmal versuchen
+  measureFrames();                                     // falls ein resize-Ereignis verloren ging (Drehen im Hintergrund)
+  armBack();                                           // Zurück soll die App verkleinern, nicht die Vorschau schließen
+
+  const boxEl = $('.tile-box', tile);
+  const box = boxEl.getBoundingClientRect();
+  const radius = parseFloat(getComputedStyle(boxEl).borderTopLeftRadius) || 0;
+  opened = { id, tile, frame: f };
+  fillStage(a, f);
+  document.documentElement.classList.add('app-open');
+  $('#stage').removeAttribute('aria-hidden');
+  lockBackground(tile);
+  tile.classList.add('is-open');
+
+  const to = stageRect();
+  const s = box.width / to.width;
+  f.classList.add('open');
+  Object.assign(f.style, {
+    left: to.left + 'px', top: to.top + 'px', width: to.width + 'px', height: to.height + 'px',
+    transform: `translate(${box.left - to.left}px, ${box.top - to.top}px) scale(${s})`,
+    borderRadius: (radius / s) + 'px',
+  });
+  f.inert = false; f.removeAttribute('aria-hidden'); f.tabIndex = 0;
+  void f.offsetWidth;                                  // Startlage festschreiben, sonst läuft kein Übergang
+  f.classList.add('anim');
+  f.style.transform = 'none';
+  f.style.borderRadius = '0px';
+  setTimeout(() => {
+    if (!opened || opened.frame !== f) return;
+    try { f.focus(); f.contentWindow.focus(); } catch (e) { /* egal */ }
+  }, OPEN_MS);
+}
+
+/** Zurück in die Kachel, derselbe Weg rückwärts. */
+function closeApp() {
+  if (!opened) return;
+  const { tile, frame: f } = opened;
+  opened = null;
+  const boxEl = $('.tile-box', tile);
+  const box = boxEl.getBoundingClientRect();
+  const radius = parseFloat(getComputedStyle(boxEl).borderTopLeftRadius) || 0;
+  const L = parseFloat(f.style.left), T = parseFloat(f.style.top), W = parseFloat(f.style.width);
+  const s = box.width ? box.width / W : 0.2;           // Kachel weggefiltert: einfach klein werden
+  const hadFocus = document.activeElement === f;
+  f.style.transform = box.width
+    ? `translate(${box.left - L}px, ${box.top - T}px) scale(${s})`
+    : `translate(${W * 0.4}px, 40px) scale(${s})`;
+  f.style.borderRadius = (radius / s) + 'px';
+  document.documentElement.classList.remove('app-open');
+  $('#stage').setAttribute('aria-hidden', 'true');
+  lockBackground(null);
+  const meta = $('meta[name="theme-color"]');
+  if (meta && barBefore !== null) meta.content = barBefore;
+  barBefore = null;
+
+  setTimeout(() => {
+    f.classList.remove('open', 'anim');
+    ['left', 'top', 'width', 'height', 'transform', 'borderRadius'].forEach((k) => { f.style[k] = ''; });
+    f.inert = true; f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
+    tile.classList.remove('is-open');
+    measureFrames();                                   // Fenster hat sich derweil vielleicht gedreht
+    if (tile.dataset.stale) { delete tile.dataset.stale; refreshTile(tile); }
+    if (hadFocus || document.activeElement === document.body) $('.tile-hit', tile).focus({ preventScroll: true });
+  }, OPEN_MS);
+}
+
+/** Zurück bei großer App. Die App bekommt ein popstate, als hätte sie es
+    selbst empfangen, und reagiert mit ihrer eigenen Logik: Sheet zu, Tab
+    „Übersicht“, Buch schließen … Am Ende fragt jede Deiner Apps „App
+    verlassen?“ — dieses Sheet erscheint dann neu, wird gleich wieder
+    zugemacht und die App stattdessen klein. Tut die App gar nichts (kein
+    eigener Wächter, fremde Seite), wird sie ebenfalls klein. */
+function backInApp() {
+  const f = opened.frame;
+  let w = null, d = null;
+  try { w = f.contentWindow; d = f.contentDocument; } catch (e) { /* fremder Origin */ }
+  if (!w || !d || !d.body) { closeApp(); return; }
+  const hadSheet = appSheetOpen(f);
+  const before = d.body.innerHTML;
+  try { w.dispatchEvent(new w.PopStateEvent('popstate', { state: w.history.state })); }
+  catch (e) { closeApp(); return; }
+  if (!hadSheet && appSheetOpen(f)) {
+    const c = d.getElementById('sheetCancel');
+    if (c) c.click();
+    closeApp();
+    return;
+  }
+  if (d.body.innerHTML === before) closeApp();
+}
+
+/** Große App neu laden, ohne sie zu schließen: frisches iframe an dieselbe
+    Stelle, das alte fliegt raus. location.reload() ginge nicht — ein neues
+    Dokument im alten iframe liefe ohne Eingriff (patchFrame). */
+function reloadOpen() {
+  if (!opened) return;
+  const { tile, frame: old } = opened;
+  const a = appById(tile.dataset.id);
+  const f = addFrame($('.tile-box', tile), a, false);
+  ['left', 'top', 'width', 'height'].forEach((k) => { f.style[k] = old.style[k]; });
+  f.style.transform = 'none';                          // sonst gälte der Maßstab der Kachel
+  f.classList.add('open');
+  f.inert = false; f.removeAttribute('aria-hidden'); f.tabIndex = 0;
+  old.remove();
+  opened.frame = f;
+  delete tile.dataset.stale;
+  showStale(false);
+  f.addEventListener('load', () => {
+    if (!opened || opened.frame !== f) return;
+    try { f.focus(); } catch (e) { /* egal */ }
+  }, { once: true });
+}
+
+/** In der Leiste statt des Namens: „In einem anderen Fenster geändert“. */
+function showStale(on) {
+  $('#stageNote').classList.toggle('hidden', !on);
+  $('#stageName').classList.toggle('hidden', on);
+}
+
+/* ── Frische ────────────────────────────────────────────────────
+   Wann ist eine Vorschau veraltet? Wenn jemand anderes ihre Daten geändert
+   hat — meist die installierte App in ihrem eigenen Fenster. */
+
+/** Welche Apps gehören zu einer Seitenadresse? storage-Ereignisse nennen die
+    Adresse der Seite, die gespeichert hat. Passt sie in den Ordner einer App,
+    ist es deren Änderung. Unbekannt → null = alle. */
+function appsForUrl(url) {
+  if (!url) return null;
+  let u;
+  try { u = new URL(url); } catch (e) { return null; }
+  return db.apps.filter((a) => {
+    try {
+      const x = new URL(a.url);
+      return x.origin === u.origin && u.pathname.startsWith(x.pathname.replace(/[^/]*$/, ''));
+    } catch (e) { return false; }
+  }).map((a) => a.id);
+}
+
+function markStale(ids) {
+  for (const tile of $$('#grid .tile[data-id]')) {
+    if (ids && !ids.includes(tile.dataset.id)) continue;
+    if (opened && opened.tile === tile) { tile.dataset.stale = '1'; showStale(true); continue; }
+    if (opened || document.hidden) { tile.dataset.stale = '1'; continue; }
+    refreshTile(tile);
+  }
+}
+
+function flushStale() {
+  if (document.hidden || opened) return;
+  $$('#grid .tile[data-stale]').forEach((tile) => { delete tile.dataset.stale; refreshTile(tile); });
+}
+
+/** Hat gerade eine Vorschau hier selbst gespeichert? Dann ist die Änderung
+    nicht fremd — sonst lüde eine App, die beim Start speichert, sich und
+    die anderen im Kreis neu. */
+function fromOwnFrame() {
+  const now = Date.now();
+  return $$('#grid .tile-frame').some((f) => {
+    try { return now - (f.contentWindow.__wrote || 0) < OWN_WRITE_MS; } catch (e) { return false; }
+  });
+}
+
+/** Prüfsumme über den Speicher aller Apps. Liegt das Fenster im Hintergrund,
+    stellt Chrome es unter Umständen still, und storage-Ereignisse kommen
+    nicht an. Beim Zurückkommen zeigt der Vergleich, ob sich etwas getan hat. */
+function storePrint() {
+  let h = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k.startsWith('dashboard.')) continue;
+      const s = k + '\u0000' + localStorage.getItem(k);
+      for (let j = 0; j < s.length; j++) h = (h * 31 + s.charCodeAt(j)) | 0;
+    }
+  } catch (e) { return null; }
+  return h;
+}
+
+let printHidden = null;
+
+/** Eine Vorschau hat gespeichert. Liegt das Fenster im Hintergrund, gehört
+    das in die Vergleichsbasis — der Reader etwa sichert beim Wechsel in den
+    Hintergrund seinen Lesestand, und das ist keine fremde Änderung. */
+function ownWrite() {
+  if (document.hidden && printHidden !== null) printHidden = storePrint();
+}
+
+function wirePreviews() {
+  $('#stageClose').onclick = closeApp;
+  $('#stageReload').onclick = reloadOpen;
+  $('#stageNote').onclick = reloadOpen;
+  // Nach dem Antippen öffnet der Link die installierte App, hier wird sie wieder klein
+  $('#stageLaunch').addEventListener('click', () => setTimeout(closeApp, 0));
+  if (IN_FRAME) return;
+
+  window.addEventListener('storage', (e) => {
+    if (!previewMode()) return;
+    if (e.storageArea && e.storageArea !== localStorage) return;
+    if (e.key && e.key.startsWith('dashboard.')) return;
+    if (fromOwnFrame()) return;
+    markStale(appsForUrl(e.url));
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { printHidden = previewMode() ? storePrint() : null; return; }
+    const p = storePrint();
+    if (printHidden !== null && p !== printHidden && !fromOwnFrame()) markStale(null);
+    printHidden = null;
+    flushStale();
+  });
+  window.addEventListener('online', () => $$('#grid .tile.failed').forEach((t) => refreshTile(t)));
+  window.addEventListener('resize', () => {
+    if (!opened) { measureFrames(); return; }
+    // Tastatur in der großen App: nur sie anpassen, die Kacheln bleiben, wie sie sind
+    const r = stageRect();
+    Object.assign(opened.frame.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+  });
 }
 
 /* ── Sortieren ──────────────────────────────────────────────────
@@ -552,7 +1190,9 @@ function beginDrag() {
   clearTimeout(d.timer);
   const r = d.el.getBoundingClientRect();
   const g = d.el.cloneNode(true);
-  g.classList.remove('lift');
+  // Ohne iframe: eine Kopie davon würde die App ein zweites Mal laden. Die Kopie zeigt das Symbol.
+  $$('iframe, .tile-hit', g).forEach((x) => x.remove());
+  g.classList.remove('lift', 'live');
   g.classList.add('drag-ghost');
   g.removeAttribute('data-id');
   g.setAttribute('aria-hidden', 'true');
@@ -578,7 +1218,7 @@ function moveDrag(x, y) {
   if (!t || t === d.el) return;
   const tiles = $$('#grid .tile[data-id]');
   const from = tiles.indexOf(d.el), to = tiles.indexOf(t);
-  $('#grid').insertBefore(d.el, to > from ? t.nextSibling : t);
+  moveEl($('#grid'), d.el, to > from ? t.nextSibling : t);   // ohne eine Vorschau neu zu laden
 }
 
 /** Am oberen oder unteren Rand weiterrollen, damit lange Listen sortierbar sind. */
@@ -786,10 +1426,22 @@ function refreshForm() {
   $('#f_preview').innerHTML = iconHtml(shown)
     + `<div class="preview-t"><b>${esc(shown.name || 'Neue App')}</b>${esc(u.ok ? shortUrl(u.href) : 'Adresse fehlt noch')}</div>`;
 
+  const hints = [];
   // Fehlender Schrägstrich: häufigster Grund, warum die installierte App den Link nicht fängt
-  $('#f_url_hint').innerHTML = u.ok && missingSlash(u.href)
-    ? `Endet die Adresse der App auf „/“ (z. B. …/reader/)? Nur dann liegt sie im Bereich der
-       installierten App. <button type="button" class="link" data-f="slash">„/“ ergänzen</button>` : '';
+  if (u.ok && missingSlash(u.href)) {
+    hints.push(`Endet die Adresse der App auf „/“ (z. B. …/reader/)? Nur dann liegt sie im Bereich der
+       installierten App. <button type="button" class="link" data-f="slash">„/“ ergänzen</button>`);
+  }
+  // Die Live-Vorschau zeigt nur Apps derselben Adresse zuverlässig, mit ihren echten Daten
+  if (u.ok && db.view === 'preview') {
+    if (sameOrigin(u.href) && new URL(u.href).pathname.startsWith(new URL('./', location.href).pathname)) {
+      hints.push('Das ist das Dashboard selbst. In der Vorschau erscheint dann nur sein Symbol, sonst lüde es sich endlos ineinander.');
+    } else if (!sameOrigin(u.href)) {
+      hints.push(`Liegt nicht unter ${esc(location.host)}. Die Live-Vorschau zeigt die Seite nur, wenn sie das Einbetten
+         erlaubt, und dann nicht mit den Daten Deiner installierten App.`);
+    }
+  }
+  $('#f_url_hint').innerHTML = hints.join('<br>');
 
   const pkgOk = PKG_RE.test(f.pkg);
   let mh = '';
@@ -1074,6 +1726,7 @@ async function copyText(s) {
    als data-Attribut auf <html>, style.css stellt danach die Tokens um. */
 const LOOK_OPTS = {
   theme:  [['light', 'Hell'], ['dark', 'Dunkel'], ['auto', 'Automatisch']],
+  view:   [['icons', 'Symbole'], ['preview', 'Live-Vorschau']],
   layout: [['grid', 'Raster'], ['list', 'Liste']],
   size:   [['s', 'Kompakt'], ['m', 'Normal'], ['l', 'Groß']],
   shape:  [['square', 'Eckig'], ['rounded', 'Abgerundet'], ['round', 'Rund']],
@@ -1095,6 +1748,22 @@ const CHECKLIST_HTML = `<ol>
     (Übersicht unten, auch im Backup).</li>
 </ol>`;
 
+/** Was man über die Live-Vorschau wissen sollte — dasselbe steht im README. */
+const PREVIEW_NOTES_HTML = `<ul>
+  <li><b>Dieselben Daten.</b> Vorschau und installierte App teilen sich den Speicher. Was Du in der großen App
+    hier änderst, ist auch in der installierten App geändert, und umgekehrt.</li>
+  <li><b>Nicht gleichzeitig benutzen.</b> Deine Apps lesen ihre Daten nur beim Start. Läuft eine App noch im
+    Hintergrund, während Du sie hier änderst, überschreibt sie die Änderung beim nächsten Speichern. Also
+    die installierte App vorher schließen oder dort einmal neu starten.</li>
+  <li>Ändert die installierte App etwas, lädt die Vorschau die Kachel von selbst neu. Ist die App hier gerade
+    groß, steht oben „In einem anderen Fenster geändert“. Ein Tipp darauf lädt sie neu.</li>
+  <li>Zurück wirkt in der großen App wie in der App selbst: erst schließt sie ihr Fenster oder springt zur
+    Übersicht, dann wird sie klein. ↗ oben rechts startet sie als installierte App.</li>
+  <li>Nach einem Update einer App kann ein einzelner Druck auf Zurück ohne Wirkung bleiben. Der nächste wirkt wieder.</li>
+  <li>Jede Vorschau ist eine laufende App. Bei vielen Kacheln kostet das etwas Speicher und Akku. In der Ansicht
+    „Symbole“ läuft keine.</li>
+</ul>`;
+
 function openSettings() {
   const seg = (key) => `<div class="seg" role="group" aria-labelledby="st_${key}_l">${LOOK_OPTS[key].map(([v, l]) =>
     `<button type="button" data-set="${key}" data-val="${v}" aria-pressed="${db[key] === v}"`
@@ -1107,6 +1776,9 @@ function openSettings() {
       <label class="fld-l" for="st_title">Titel</label>
       <input class="inp" id="st_title" maxlength="${NAME_MAX}" autocomplete="off" value="${esc(db.title)}">
     </div>
+    ${fld('view', 'Ansicht', `<p class="fld-hint">Symbole: ein Tipp startet die installierte App. Live-Vorschau:
+      jede Kachel zeigt die App selbst, ein Tipp macht sie groß. Umschalten geht auch direkt oben,
+      mit dem Knopf vor dem Stift.</p>`)}
     ${fld('theme', 'Theme')}
     <div class="fld">
       <span class="fld-l" id="st_accent_l">Akzentfarbe</span>
@@ -1118,6 +1790,10 @@ function openSettings() {
     ${fld('labels', 'Beschriftung', '<p class="fld-hint">Gilt für das Raster. In der Liste steht der Name immer da.</p>')}
     ${fld('font', 'Schriftgröße')}
 
+    <h2 class="sec">Live-Vorschau</h2>
+    <button type="button" class="btn btn-block${previewMode() ? '' : ' hidden'}" data-st="refresh" style="margin-bottom:var(--sp-3)">Alle Vorschauen neu laden</button>
+    <details class="guide"><summary>Gut zu wissen</summary><div>${PREVIEW_NOTES_HTML}</div></details>
+
     <h2 class="sec">Öffnen</h2>
     <div class="fld" role="radiogroup" aria-labelledby="st_method_l">
       <span class="fld-l" id="st_method_l">Standard-Öffnungsmethode</span>
@@ -1126,8 +1802,9 @@ function openSettings() {
           <span class="choice-t"><b>${esc(METHODS[k].long)}${k === 'pkg' ? '<span class="tag">empfohlen</span>' : ''}</b>
           <small>${esc(METHODS[k].desc)}${k === 'pkg' ? ' Apps ohne Paketnamen öffnen dann automatisch.' : ''}</small></span></label>`).join('')}
       </div>
-      <p class="fld-hint">Gilt für alle Apps, bei denen „Standard“ eingestellt ist. Welche Methode bei einer App
-        klappt, findest Du im Formular der App heraus (Stift oben, dann die App antippen).</p>
+      <p class="fld-hint">Gilt für alle Apps, bei denen „Standard“ eingestellt ist, bei den Symbolen für den Tipp
+        auf die Kachel, in der Live-Vorschau für ↗ in der großen App. Welche Methode bei einer App klappt,
+        findest Du im Formular der App heraus (Stift oben, dann die App antippen).</p>
     </div>
     <details class="guide"><summary>Checkliste für Ziel-Apps</summary><div>${CHECKLIST_HTML}</div></details>
     <details class="guide"><summary>Paketname finden</summary><div><ol>
@@ -1206,7 +1883,8 @@ function setLook(key, val) {
   db[key] = val;
   applyLook();
   save();
-  if (key === 'layout' || key === 'labels') render();
+  // In der Vorschau auch Größe und Form: die Kacheln brauchen ihren neuen Maßstab
+  if (key === 'layout' || key === 'labels' || key === 'view' || previewMode()) render();
 }
 
 function onSettingsClick(e) {
@@ -1214,7 +1892,10 @@ function onSettingsClick(e) {
   if (!b) return;
   const ds = b.dataset;
   if (ds.set) {
-    setLook(ds.set, ds.val);
+    if (ds.set === 'view') {
+      setView(ds.val);
+      $('#sheetBody [data-st="refresh"]').classList.toggle('hidden', !previewMode());
+    } else setLook(ds.set, ds.val);
     $$(`#sheetBody [data-set="${ds.set}"]`).forEach((x) => {
       x.classList.toggle('on', x === b);
       x.setAttribute('aria-pressed', String(x === b));
@@ -1231,6 +1912,10 @@ function onSettingsClick(e) {
     $('#st_file').click();
   } else if (ds.st === 'copy') {
     copyText('chrome://webapks');
+  } else if (ds.st === 'refresh') {
+    refreshAll();
+    closeSheet();
+    toast('Vorschauen werden neu geladen');
   }
 }
 
@@ -1270,6 +1955,9 @@ function onSettingsInput(e) {
 
 const dfDate = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
 const BACKUP_DAYS = 60;      // danach erinnert ein Punkt am Zahnrad
+/* Diese Backups versteht der Import. „Dashboard Vorschau“ war eine eigene
+   Fassung mit Live-Vorschau (Ordner vorschau/), Format wie hier. */
+const BACKUP_APPS = ['Dashboard', 'Dashboard Vorschau'];
 
 /** Ist ein Backup fällig? Ab drei Apps ohne Backup oder wenn das letzte
     lange her ist. Bei einer einzelnen frischen Kachel wäre ein Hinweis nur lästig. */
@@ -1317,7 +2005,7 @@ function checkBackup(d) {
   if (!d || typeof d !== 'object' || Array.isArray(d)) return 'Die Datei ist kein Backup des Dashboards.';
   const m = plain(d.meta);
   // Alle Deine Apps exportieren JSON — ein Habits-Backup hier zu laden wäre ein leicht gemachter Fehler
-  if (typeof m.app === 'string' && m.app !== 'Dashboard') return `Das ist ein Backup von „${m.app}“, nicht vom Dashboard.`;
+  if (typeof m.app === 'string' && !BACKUP_APPS.includes(m.app)) return `Das ist ein Backup von „${m.app}“, nicht vom Dashboard.`;
   if (!Array.isArray(d.apps)) return 'Die Datei ist kein Backup des Dashboards: Es fehlt die Liste der Apps.';
   const v = Number.isInteger(d.v) ? d.v : 0;
   if (v > SCHEMA) {
@@ -1611,9 +2299,11 @@ function infoSheet(title, text, back) {
    viel zu leicht aus Versehen. Deshalb liegt ein zusätzlicher Verlaufseintrag
    („Wächter") über der App: Zurück landet dann bei uns statt beim System.
 
-   Der Druck schließt der Reihe nach, was offen ist — Sheet, Suche,
-   Bearbeitungsmodus — und baut den Wächter danach wieder auf. Steht nichts
-   mehr offen, fragt ein Dialog nach. */
+   Der Druck schließt der Reihe nach, was offen ist — Sheet, große App (die
+   erst selbst reagieren darf, siehe backInApp), Suche, Bearbeitungsmodus —
+   und baut den Wächter danach wieder auf. Steht nichts mehr offen, fragt ein
+   Dialog nach. Die Apps in den Vorschauen legen keine eigenen Einträge an
+   (patchFrame), deshalb landet jeder Druck hier. */
 let guardUp = false;
 let leaving = false;
 
@@ -1654,6 +2344,7 @@ function wireBack() {
     // Über den Abbrechen-Knopf, nicht über closeSheet: verschachtelte Sheets
     // haben dort ihren Rückweg zum vorherigen Sheet hinterlegt.
     if (sheetOpen()) { $('#sheetCancel').click(); pushGuard(); return; }
+    if (opened) { backInApp(); pushGuard(); return; }
     if (query) { query = ''; $('#search').value = ''; render(); pushGuard(); return; }
     if (editing) { setEditing(false); pushGuard(); return; }
 
@@ -1674,7 +2365,8 @@ function wire() {
       if (Date.now() - dragEndedAt < 400) { e.preventDefault(); return; }   // Loslassen nach dem Ziehen
       if (t.dataset.act === 'add') { newApp(); return; }
       if (editing) { e.preventDefault(); editApp(t.dataset.id); return; }
-      return;               // normaler Modus: der Link öffnet von selbst, mit echter Benutzergeste
+      if (previewMode()) { openApp(t.dataset.id); return; }   // Vorschau: die App wird groß
+      return;               // Symbole: der Link öffnet von selbst, mit echter Benutzergeste
     }
     const a = e.target.closest('[data-act]');
     if (!a) return;
@@ -1691,6 +2383,7 @@ function wire() {
   });
   $('#btnAdd').onclick = newApp;
   $('#btnEdit').onclick = () => setEditing(true);
+  $('#btnView').onclick = () => setView(db.view === 'preview' ? 'icons' : 'preview');
   $('#btnDone').onclick = () => setEditing(false);
   $('#btnSettings').onclick = openSettings;
   $('#sheetCancel').onclick = closeSheet;
@@ -1703,6 +2396,8 @@ function wire() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && sheetOpen()) { e.preventDefault(); $('#sheetCancel').click(); return; }
+    // Fokus in der Leiste der großen App; steht er in der App selbst, hilft hookFrame
+    if (e.key === 'Escape' && opened) { e.preventDefault(); closeApp(); return; }
     // Bearbeitungsmodus: Umschalt + Pfeiltaste verschiebt die Kachel mit dem Fokus
     const t = e.target.closest && e.target.closest('#grid .tile[data-id]');
     if (t && editing && e.shiftKey && /^Arrow(Left|Right|Up|Down)$/.test(e.key)) {
@@ -1719,6 +2414,12 @@ function wire() {
   });
   search.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
+      if (previewMode()) {
+        // Erster Treffer wird groß
+        const first = $('#grid .tile[data-id]:not(.hidden)');
+        if (first) { e.preventDefault(); search.blur(); openApp(first.dataset.id); }
+        return;
+      }
       // Erster Treffer öffnet — der Klick läuft in der Tastenaktion, zählt also als Benutzergeste
       const first = $('#grid a.tile');
       if (first) { e.preventDefault(); first.click(); }
@@ -1758,7 +2459,7 @@ function wireLongPress() {
   };
   document.addEventListener('pointerdown', (e) => {
     pressFired = false;          // Nicht jeder lange Druck endet in einem Klick — hier sicher zurücksetzen
-    const t = e.target.closest('#grid a.tile');
+    const t = e.target.closest('#grid .tile[data-id]');
     if (!t || e.button > 0 || editing) return;
     x = e.clientX; y = e.clientY;
     cancel();
@@ -1783,6 +2484,8 @@ load();
 applyLook();
 wire();
 wireBack();
+wirePreviews();
+measureFrames();             // vor dem ersten render: die Vorschauen brauchen ihr Seitenverhältnis
 renderNotices();
 render();
 resumeTest();

@@ -21,7 +21,7 @@
     root.dataset.theme = t;
     var look = JSON.parse(localStorage.getItem('dashboard.look') || 'null');
     if (look) {
-      ['layout', 'size', 'shape', 'labels', 'font'].forEach(function (k) {
+      ['view', 'layout', 'size', 'shape', 'labels', 'font'].forEach(function (k) {
         if (look[k]) root.dataset[k] = look[k];
       });
       if (look.accent) root.style.setProperty('--accent', look.accent);
@@ -41,6 +41,8 @@
 <header class="topbar" id="topbar">
   <h1 id="title">Meine Apps</h1>
   <div class="top-actions">
+    <!-- Ansicht umschalten (Symbole ↔ Live-Vorschau); Symbol und Beschriftung setzt app.js -->
+    <button class="icon-btn hidden" id="btnView" aria-label="Ansicht wechseln"></button>
     <button class="icon-btn" id="btnEdit" aria-label="Bearbeiten" aria-pressed="false">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>
@@ -86,6 +88,29 @@
     <button class="link strong" id="sheetSave">Sichern</button>
   </div>
   <div class="sheet-body" id="sheetBody"></div>
+</div>
+
+<!-- Bühne: hier wird eine App groß. Das iframe selbst bleibt in seiner
+     Kachel (Umhängen würde es neu laden) und legt sich nur per position:fixed
+     über den Platzhalter #stageSlot. Die Bühne ist nie display:none, damit
+     sich ihre Maße auch geschlossen messen lassen. -->
+<div class="stage" id="stage" aria-hidden="true">
+  <div class="stage-col">
+    <div class="stage-bar">
+      <button class="icon-btn" id="stageClose" aria-label="Verkleinern">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <strong class="stage-name" id="stageName"></strong>
+      <button class="stage-note hidden" id="stageNote">In einem anderen Fenster geändert · <u>Neu laden</u></button>
+      <button class="icon-btn" id="stageReload" aria-label="Neu laden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>
+      </button>
+      <a class="icon-btn" id="stageLaunch" aria-label="Als installierte App öffnen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 5h5v5"/><path d="M19 5l-8 8"/><path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4"/></svg>
+      </a>
+    </div>
+    <div class="stage-slot" id="stageSlot"></div>
+  </div>
 </div>
 
 <div class="update-bar hidden" id="updateBar" role="status">

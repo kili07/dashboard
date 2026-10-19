@@ -4,6 +4,8 @@
    Aufbau:
    1. Design-Tokens (Maße, Typo, Bewegung) — themenunabhängig
    2. Einstellungen, die nur Tokens umstellen (data-size, data-shape …)
+      — die Ansicht „Live-Vorschau“ (data-view="preview") hat dazu einen
+      eigenen Block bei den Kacheln
    3. Themes, die nur Tokens überschreiben
    4. Komponenten, die ausschließlich Tokens benutzen
 
@@ -44,6 +46,18 @@
 :root[data-size="s"]{ --tile:52px; }
 :root[data-size="l"]{ --tile:80px; }
 
+/* Live-Vorschau: Kachelgröße heißt hier Mindestbreite einer Vorschau im
+   Raster (daraus ergibt sich die Spaltenzahl: am Handy 4, 3 oder 2) und
+   Breite des Vorschaubilds in der Liste. */
+:root[data-view="preview"]{ --cell:100px; --thumb:46px; }
+:root[data-view="preview"][data-size="s"]{ --cell:76px; --thumb:38px; }
+:root[data-view="preview"][data-size="l"]{ --cell:150px; --thumb:58px; }
+
+/* Renderformat der Apps in der Live-Vorschau: so groß wie die geöffnete App,
+   app.js trägt die gemessenen Werte ein (ohne Einheit, für aspect-ratio).
+   Die Werte hier gelten nur bis dahin. --open-ms passt zu OPEN_MS in app.js. */
+:root{ --fwn:390; --fhn:760; --frame-max:480px; --open-ms:.28s; }
+
 /* Schriftgröße: alle Texte in rem, deshalb genügt die Wurzel */
 :root[data-font="s"]{ --fs:14px; }
 :root[data-font="l"]{ --fs:17px; }
@@ -54,6 +68,18 @@
 :root[data-shape="square"]{ --ic-r:calc(var(--ic) * .07); }
 :root[data-shape="round"]{ --ic-r:50%; }
 :root[data-layout="list"] .grid{ --ic:calc(var(--tile) * .62); }
+
+/* Live-Vorschau: --box-w ist die Breite des Vorschaubilds, --box-r seine
+   Ecken (Kachelform). „Rund“ heißt bei einem Hochformat: deutlich gerundete
+   Ecken, kein Kreis. --ic ist das Symbol, das in der Vorschau steht, bis die
+   App gezeichnet hat. */
+:root[data-view="preview"]{
+  --box-w:var(--cell); --box-r:calc(var(--box-w) * .12);
+  --ic:calc(var(--box-w) * .44); --ic-r:calc(var(--ic) * .26);
+}
+:root[data-view="preview"][data-shape="square"]{ --box-r:calc(var(--box-w) * .04); --ic-r:calc(var(--ic) * .07); }
+:root[data-view="preview"][data-shape="round"]{ --box-r:calc(var(--box-w) * .24); --ic-r:50%; }
+:root[data-view="preview"][data-layout="list"] .grid{ --box-w:var(--thumb); }
 
 /* ── 3. Themes ──────────────────────────────────────────────── */
 /* Gilt für beide Fälle: ohne data-theme und mit data-theme="dark" */
@@ -258,6 +284,84 @@ main{padding:0 var(--safe-r) 0 var(--safe-l)}
 body.dragging{cursor:grabbing}
 body.dragging *{user-select:none}
 
+/* ── Kacheln der Live-Vorschau ──────────────────────────────── */
+/* Gleicher Aufbau wie oben, nur zeigt tile-box statt des Symbols die App
+   selbst (Hochformat). Alles hier gilt nur mit data-view="preview";
+   tile-frame, tile-hit und die Bühne gibt es nur in dieser Ansicht. */
+:root[data-view="preview"] .grid{
+  grid-template-columns:repeat(auto-fill, minmax(var(--cell), 1fr));
+  gap:16px 10px;
+}
+:root[data-view="preview"]:not([data-layout="list"]) .tile{align-items:stretch;padding:0}
+/* Das Vorschaubild: Seitenverhältnis wie die geöffnete App */
+:root[data-view="preview"] .tile-box{
+  display:block; width:100%;
+  aspect-ratio:var(--fwn) / var(--fhn);
+  border-radius:var(--box-r); overflow:hidden;
+  background:var(--surface);
+  transition:transform var(--fast) var(--ease);
+}
+/* Kante über der App, damit dunkle Apps nicht im dunklen Grund verschwimmen */
+:root[data-view="preview"] .tile-box::after{
+  content:""; position:absolute; inset:0; z-index:1; border-radius:inherit; pointer-events:none;
+  box-shadow:inset 0 0 0 1px var(--tile-edge);
+}
+:root[data-view="preview"] .tile:active .tile-box{transform:scale(.97)}
+:root[data-view="preview"] .tile:active .tile-ic{transform:none}
+/* FALLE: transform macht die Kachel zum Bezug für position:fixed — das iframe
+   der großen App säße dann in der Kachel fest. Solange sie offen ist: keins. */
+.tile.is-open .tile-box{transform:none !important;transition:none}
+
+/* Platzhalter, bis die App gezeichnet hat, und Ersatz, wenn sie nicht lädt */
+:root[data-view="preview"] .tile-box > .tile-ic{position:absolute;inset:0;margin:auto}
+
+/* Die App selbst: in voller Größe gerendert, auf die Kachel verkleinert.
+   --s (Kachelbreite ÷ Renderbreite) setzt app.js je Kachel. */
+.tile-frame{
+  position:absolute; left:0; top:0; display:block; border:0; margin:0; padding:0;
+  width:calc(var(--fwn) * 1px); height:calc(var(--fhn) * 1px);
+  transform-origin:0 0; transform:scale(var(--s, .25));
+  background:var(--bg); pointer-events:none;
+  opacity:0; transition:opacity var(--mid);
+}
+.tile.live .tile-frame{opacity:1}
+.tile-frame.next{opacity:0 !important}           /* Ersatz lädt unsichtbar dahinter */
+.tile.failed .tile-frame{visibility:hidden}
+.tile.failed .tile-box::before{
+  content:"nicht erreichbar"; position:absolute; left:0; right:0; bottom:9%;
+  color:var(--muted); font-size:.68rem; text-align:center; white-space:nowrap;
+}
+
+/* Trefferfläche über der ganzen Kachel: nimmt Tipp, langen Druck und Ziehen an */
+.tile-hit{
+  position:absolute; inset:-4px; z-index:2; margin:0; padding:0;
+  background:none; border:0; border-radius:calc(var(--box-r) + 4px);
+  -webkit-touch-callout:none;
+}
+.tile-hit:focus-visible{outline:2px solid var(--accent-ink);outline-offset:0}
+
+/* Liste: kleines Vorschaubild links, Name und Adresse daneben */
+:root[data-view="preview"][data-layout="list"] .tile-box{width:var(--thumb)}
+:root[data-layout="list"] .tile-hit{inset:0;border-radius:var(--r)}
+:root[data-view="preview"][data-layout="list"] .tile:active .tile-box{transform:none}
+:root[data-layout="list"] .tile.failed .tile-box::before{content:none}
+
+/* Bearbeiten: das Stift-Abzeichen sitzt in der Ecke der Vorschau */
+:root[data-view="preview"] .tile-badge{top:6px;right:6px;z-index:1}
+:root[data-view="preview"][data-layout="list"] .tile-box .tile-badge{display:none}
+
+:root[data-view="preview"] .tile-add .tile-box{background:none;box-shadow:inset 0 0 0 1.5px var(--line)}
+:root[data-view="preview"] .tile-add .tile-box::after{content:none}
+:root[data-view="preview"] .tile-add .tile-ic{box-shadow:none}
+:root[data-view="preview"] .tile-add .tile-ic svg{width:60%;height:60%}
+
+/* Ziehen: die Kopie hat kein iframe (das lüde die App neu), sie zeigt das Symbol */
+:root[data-view="preview"] .tile.lift .tile-box{transform:scale(1.04)}
+:root[data-view="preview"] .tile.lift .tile-ic,
+:root[data-view="preview"] .drag-ghost .tile-ic{transform:none;box-shadow:inset 0 0 0 1px var(--tile-edge)}
+:root[data-view="preview"] .drag-ghost .tile-box{transform:scale(1.04);box-shadow:var(--ghost-shadow)}
+:root[data-view="preview"][data-layout="list"] .drag-ghost .tile-box{transform:none;box-shadow:none}
+
 /* Leerer Zustand */
 .empty{grid-column:1 / -1;padding:14vh var(--sp-2) 0;text-align:center}
 .empty p{margin:0 auto var(--sp-5);max-width:30ch;color:var(--text-2);font-size:1.05rem}
@@ -415,6 +519,40 @@ body.dragging *{user-select:none}
 .about{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);color:var(--text-2)}
 .num{font-family:var(--font-num);font-variant-numeric:tabular-nums}
 .fld-hint.warn{color:var(--danger)}
+
+/* ── Bühne: die große App ───────────────────────────────────── */
+/* Nie display:none — app.js misst den Platzhalter #stageSlot auch geschlossen,
+   daraus ergibt sich das Format aller Vorschauen. */
+.stage{
+  position:fixed; inset:0; z-index:44;
+  display:flex; justify-content:center;
+  background:var(--scrim);
+  opacity:0; visibility:hidden;
+  transition:opacity var(--mid), visibility 0s linear var(--mid);
+}
+html.app-open{overflow:hidden}
+html.app-open .stage{opacity:1;visibility:visible;transition:opacity var(--mid)}
+/* Spalte in den Farben der App (--stage-bg/--stage-fg setzt app.js aus ihrem
+   Hintergrund). Am Desktop schmal wie ein Handy, sonst randlos. */
+.stage{--stage-bg:var(--bg);--stage-fg:var(--text)}
+.stage-col{
+  width:min(100%, var(--frame-max)); display:flex; flex-direction:column;
+  background:var(--stage-bg); color:var(--stage-fg);
+  padding:env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+}
+.stage-bar{flex:none;height:48px;display:flex;align-items:center;gap:2px;padding:0 4px}
+.stage-bar .icon-btn{color:inherit}
+.stage-bar .icon-btn:active{background:color-mix(in srgb, currentColor 12%, transparent)}
+.stage-name,.stage-note{
+  flex:1; min-width:0; text-align:center; font-size:.95rem; font-weight:600;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.stage-note{min-height:44px;padding:0 var(--sp-2);background:none;border:0;color:inherit;font-weight:500}
+.stage-slot{flex:1;min-height:0}
+
+/* Das iframe der großen App: dasselbe wie in der Kachel, nur festgesetzt */
+.tile-frame.open{position:fixed;z-index:45;pointer-events:auto;opacity:1 !important;visibility:visible}
+.tile-frame.anim{transition:transform var(--open-ms) var(--ease), border-radius var(--open-ms) var(--ease)}
 
 /* ── Leiste „Neue Version“ und Toast ────────────────────────── */
 .update-bar{

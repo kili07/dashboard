@@ -2,7 +2,7 @@
    Bei jeder Änderung an den Dateien CACHE hochzählen.
    Der Name beginnt bewusst NICHT mit „dashboard-“: Das Dashboard im
    Elternordner löscht beim Aktualisieren alle Caches mit diesem Präfix. */
-const CACHE = 'vorschau-v1';
+const CACHE = 'vorschau-v2';
 const ASSETS = [
   './', './index.html', './style.css', './app.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',

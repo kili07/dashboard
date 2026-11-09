@@ -25,7 +25,7 @@ const DASHBOARD_KEY = 'dashboard.v1';
 const SCHEMA = 1;
 /* Bei jeder Änderung hochzählen — wird in den Einstellungen angezeigt, damit
    sich auf dem Handy prüfen lässt, welche Fassung wirklich läuft. */
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 
 /* Spiegel für das Startskript in index.html: ohne sie flackert beim Start das
    Theme und die Kacheln springen in ihre Größe. */
@@ -942,10 +942,10 @@ function closeApp() {
 
 /** Zurück bei großer App. Die App bekommt ein popstate, als hätte sie es
     selbst empfangen, und reagiert mit ihrer eigenen Logik: Sheet zu, Tab
-    „Übersicht“, Buch schließen … Am Ende fragt jede Deiner Apps „App
-    verlassen?“ — dieses Sheet erscheint dann neu, wird gleich wieder
-    zugemacht und die App stattdessen klein. Tut die App gar nichts (kein
-    eigener Wächter, fremde Seite), wird sie ebenfalls klein. */
+    „Übersicht“, Buch schließen … Auf ihrer Übersicht tut jede Deiner Apps
+    in der Vorschau nichts (leaveHint), dann wird sie klein. Ältere Fassungen
+    fragen noch „App verlassen?“: dieses Sheet wird gleich wieder zugemacht
+    und die App ebenfalls klein. Ebenso bei fremden Seiten ohne Wächter. */
 function backInApp() {
   const f = opened.frame;
   let w = null, d = null;
@@ -2262,11 +2262,10 @@ function infoSheet(title, text, back) {
 
    Der Druck schließt der Reihe nach, was offen ist — Sheet, große App (die
    erst selbst reagieren darf, siehe backInApp), Suche, Bearbeitungsmodus —
-   und baut den Wächter danach wieder auf. Steht nichts mehr offen, fragt ein
-   Dialog nach. Die Apps in den Kacheln legen keine eigenen Einträge an
+   und baut den Wächter danach wieder auf. Steht nichts mehr offen, kommt ein
+   Hinweis (leaveHint). Die Apps in den Kacheln legen keine eigenen Einträge an
    (patchFrame), deshalb landet jeder Druck hier. */
 let guardUp = false;
-let leaving = false;
 
 function pushGuard() {
   if (guardUp) return;
@@ -2277,14 +2276,19 @@ function pushGuard() {
 /** Vor allem, was die Zurück-Taste abfangen soll: Sheet öffnen, Modus wechseln. */
 function armBack() { pushGuard(); }
 
-/** „Verlassen" im Abschiedsdialog: der Dialog hat selbst einen Wächter
-    aufgebaut (jedes Sheet tut das). Erst ihn abräumen, dann führt der zweite
-    Schritt aus der App. Beides muss über zwei Runden laufen — history.back()
-    zweimal hintereinander fasst der Browser zu einem Schritt zusammen. */
-function leaveApp() {
-  closeSheet();
-  leaving = true;
-  history.back();
+/** Zurück auf der Übersicht: Hinweis statt Dialog. Ein „Verlassen"-Knopf
+    kann die installierte App nicht schließen: history.back() vom ersten
+    Verlaufseintrag aus tut nichts, window.close() blockt der Browser, sobald
+    der Verlauf mehr als einen Eintrag hat. Nur die System-Zurückgeste selbst
+    beendet die App. Deshalb bleibt der Wächter hier unten, und der nächste
+    Zurück-Druck schließt die App. Tippt man stattdessen in die App, steht der
+    Wächter wieder (Antippen zählt als Nutzeraktion; ohne sie überspringt
+    Chrome den Eintrag beim Zurückgehen). In der Dashboard-Vorschau nichts tun,
+    dann verkleinert das Dashboard die App. */
+function leaveHint(msg) {
+  if (window.__dashboard) return;
+  toast(msg || 'Zum Verlassen nochmal zurück wischen');
+  document.addEventListener('pointerdown', pushGuard, { once: true });
 }
 
 function wireBack() {
@@ -2292,16 +2296,6 @@ function wireBack() {
   window.addEventListener('popstate', () => {
     guardUp = false;
 
-    if (leaving) {
-      leaving = false;
-      history.back();
-      // Falls nichts mehr zum Zurückgehen da ist (im Browser-Tab, in dem die App
-      // der erste Eintrag ist), bleiben wir hier — dann fehlt der Wächter. Kein
-      // Timer zum Nachrüsten: ein pushState würde den laufenden Schritt abbrechen
-      // und genau das Verlassen verhindern. Also erst beim nächsten Antippen.
-      document.addEventListener('pointerdown', pushGuard, { once: true });
-      return;
-    }
     // Über den Abbrechen-Knopf, nicht über closeSheet: verschachtelte Sheets
     // haben dort ihren Rückweg zum vorherigen Sheet hinterlegt.
     if (sheetOpen()) { $('#sheetCancel').click(); pushGuard(); return; }
@@ -2309,8 +2303,7 @@ function wireBack() {
     if (query) { query = ''; $('#search').value = ''; render(); pushGuard(); return; }
     if (editing) { setEditing(false); pushGuard(); return; }
 
-    askSheet('App verlassen?', 'Möchtest Du die Vorschau wirklich schließen?',
-      'Verlassen', leaveApp);
+    leaveHint();
   });
 }
 

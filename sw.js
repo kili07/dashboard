@@ -1,8 +1,10 @@
 /* Service Worker — Dashboard offline verfügbar halten.
    Bei jeder Änderung an den Dateien CACHE hochzählen. */
-const CACHE = 'dashboard-v3';
+const CACHE = 'dashboard-v4';
 const ASSETS = [
   './', './index.html', './style.css', './app.js', './manifest.webmanifest',
+  './fonts/ibm-plex-sans-condensed-latin-400-normal.woff2', './fonts/ibm-plex-sans-condensed-latin-600-normal.woff2',
+  './fonts/ibm-plex-sans-condensed-latin-700-normal.woff2',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',
 ];
 

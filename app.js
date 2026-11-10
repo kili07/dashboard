@@ -21,7 +21,7 @@ const KEY = 'dashboard.v1';
 const SCHEMA = 1;
 /* Bei jeder Änderung hochzählen — wird in den Einstellungen angezeigt, damit
    sich auf dem Handy prüfen lässt, welche Fassung wirklich läuft. */
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.2.0';
 
 /* Spiegel für das Startskript in index.html: ohne sie flackert beim Start das
    Theme und die Kacheln springen in ihre Größe. */
@@ -32,8 +32,8 @@ const LOOK_KEY = 'dashboard.look';
    <meta name="theme-color">, damit die Systemleiste des Handys mitzieht —
    muss mit --bg in style.css übereinstimmen. */
 const THEMES = {
-  light: { label: 'Hell',   bar: '#f5f6f8' },
-  dark:  { label: 'Dunkel', bar: '#0b0e14' },
+  light: { label: 'Hell',   bar: '#F2F3F5' },
+  dark:  { label: 'Dunkel', bar: '#121418' },
 };
 
 /* Vorgaben für Kachel- und Akzentfarben. Es sind Daten, keine Theme-Farben:
@@ -248,8 +248,10 @@ const isEmoji = (s) => /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(
 function glyph(a) {
   const g = graphemes(a.icon.trim());
   if (g.length) return g.slice(0, 2).join('');
-  const n = graphemes(a.name.trim());
-  return n.length ? n[0].toLocaleUpperCase('de-DE') : '?';
+  // Wie ein Elementsymbol: erster Buchstabe groß, zweiter klein („Ab“)
+  const n = graphemes(a.name.trim()).filter((c) => /\S/.test(c));
+  if (!n.length) return '?';
+  return n[0].toLocaleUpperCase('de-DE') + (n[1] ? n[1].toLocaleLowerCase('de-DE') : '');
 }
 const glyphClass = (g) => (isEmoji(g) ? 'emoji' : graphemes(g).length > 1 ? 'two' : '');
 
@@ -435,15 +437,18 @@ function iconHtml(a) {
 /** Kachel der Ansicht „Symbole“: ein echter Link, damit der Tipp als
     Benutzergeste zählt (DECISIONS.md 2, B7). */
 function tileHtml(a) {
-  const text = `<span class="tile-text"><span class="tile-name">${esc(a.name)}</span>`
+  // Ordnungszahl wie im Periodensystem: Platz in der eigenen Reihenfolge,
+  // auch beim Suchen — die Zahl gehört zur App, nicht zum Treffer.
+  const no = `<span class="tile-no" aria-hidden="true">${db.apps.indexOf(a) + 1}</span>`;
+  const text = `${no}<span class="tile-text"><span class="tile-name">${esc(a.name)}</span>`
     + `<span class="tile-sub">${esc(shortUrl(a.url))}</span></span>`;
   if (editing) {
-    return `<button type="button" class="tile" data-id="${esc(a.id)}" aria-label="${esc(a.name)} bearbeiten" aria-describedby="editHelp">`
+    return `<button type="button" class="tile" style="--c:${esc(a.color)}" data-id="${esc(a.id)}" aria-label="${esc(a.name)} bearbeiten" aria-describedby="editHelp">`
       + `<span class="tile-box">${iconHtml(a)}<span class="tile-badge" aria-hidden="true">${ICON_PEN}</span></span>${text}</button>`;
   }
   const t = launchTarget(a.url, effectiveMethod(a, db.method), a.pkg, IS_ANDROID);
   return `<a class="tile" href="${esc(t.href)}"${t.blank ? ' target="_blank" rel="noopener"' : ''}`
-    + ` data-id="${esc(a.id)}" draggable="false" aria-label="${esc(a.name)}">`
+    + ` style="--c:${esc(a.color)}" data-id="${esc(a.id)}" draggable="false" aria-label="${esc(a.name)}">`
     + `<span class="tile-box">${iconHtml(a)}</span>${text}</a>`;
 }
 

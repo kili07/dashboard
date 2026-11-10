@@ -25,7 +25,7 @@ const DASHBOARD_KEY = 'dashboard.v1';
 const SCHEMA = 1;
 /* Bei jeder Änderung hochzählen — wird in den Einstellungen angezeigt, damit
    sich auf dem Handy prüfen lässt, welche Fassung wirklich läuft. */
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.1.0';
 
 /* Spiegel für das Startskript in index.html: ohne sie flackert beim Start das
    Theme und die Kacheln springen in ihre Größe. */
@@ -36,8 +36,8 @@ const LOOK_KEY = 'vorschau.look';
    <meta name="theme-color">, damit die Systemleiste des Handys mitzieht —
    muss mit --bg in style.css übereinstimmen. */
 const THEMES = {
-  light: { label: 'Hell',   bar: '#f5f6f8' },
-  dark:  { label: 'Dunkel', bar: '#0b0e14' },
+  light: { label: 'Hell',   bar: '#F2F3F5' },
+  dark:  { label: 'Dunkel', bar: '#121418' },
 };
 
 /* Vorgaben für Kachel- und Akzentfarben. Es sind Daten, keine Theme-Farben:
